@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rose App</title>
+    <link rel="stylesheet" href="/private/style.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+</head>
+
+<body>
+
+    <div id="result"></div>
+    <div id="scoreDiv">
+        Score: 0
+    </div>
+    <div class="container mt-5">
+        <div class="row">
+            <!-- İlk Bölüm -->
+            <div class="col-md-4 text-center">
+                <div>
+                    <button type="button" class="btn btn-primary m-3" onclick="init()">Start</button>
+                    <div><canvas id="canvas" class="m-3"></canvas></div>
+                    <div id="label-container"></div>
+                </div>
+            </div>
+    
+            <!-- İkinci Bölüm -->
+            <div class="col-md-4">
+                <div id="outerDiv">
+                    <div id="movingBox"></div>
+                    <div id="staticBox"></div>
+                </div>
+            </div>
+    
+            <!-- Grafikler -->
+            <div class="col-md-4">
+                <div class="row">
+                    <div class="col-md-12">
+                        <canvas id="probabilityChart" width="200px" height="200px"></canvas>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-12">
+                        <canvas id="coordinatesChart" width="400px" height="200px"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8/dist/teachablemachine-pose.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+        var outerDiv = document.getElementById('outerDiv');
+        var movingBox = document.getElementById('movingBox');
+        var staticBox = document.getElementById('staticBox');
+        var scoreDiv = document.getElementById('scoreDiv');
+        var step = 20;
+        var score = 0;
+        var offsetX = 0;
+        var offsetY = 0;
+
+        function generateRandomPosition() {
+            var maxX = outerDiv.clientWidth - step;
+            var maxY = outerDiv.clientHeight - step;
+
+            var randomX = Math.floor(Math.random() * (maxX / step)) * step;
+            var randomY = Math.floor(Math.random() * (maxY / step)) * step;
+
+            return { x: randomX, y: randomY };
+        }
+
+        function placeStaticBox() {
+            var randomPosition = generateRandomPosition();
+            staticBox.style.left = randomPosition.x + 'px';
+            staticBox.style.top = randomPosition.y + 'px';
+        }
+
+        function checkCollision(box1, box2) {
+            var box1Rect = box1.getBoundingClientRect();
+            var box2Rect = box2.getBoundingClientRect();
+
+            return (
+                box1Rect.left < box2Rect.right &&
+                box1Rect.right > box2Rect.left &&
+                box1Rect.top < box2Rect.bottom &&
+                box1Rect.bottom > box2Rect.top
+            );
+        }
+
+        function updateScore() {
+            score++;
+            scoreDiv.textContent = 'Score: ' + score;
+        }
+
+        function moveBox(box, deltaX, deltaY) {
+            var currentLeft = parseInt(box.style.left) || 0;
+            var currentTop = parseInt(box.style.top) || 0;
+
+            var newLeft = Math.max(0, Math.min(currentLeft + deltaX, outerDiv.clientWidth - box.clientWidth));
+            var newTop = Math.max(0, Math.min(currentTop + deltaY, outerDiv.clientHeight - box.clientHeight));
+
+            box.style.left = newLeft + 'px';
+            box.style.top = newTop + 'px';
+
+            updateCoordinatesChart(newLeft, newTop);
+        }
+
+        function updateCoordinatesChart(x, y) {
+            coordinatesChart.data.labels.push('');
+            coordinatesChart.data.datasets[0].data.push(x);
+            coordinatesChart.data.datasets[1].data.push(y);
+            coordinatesChart.update();
+        }
+
+        document.addEventListener('keydown', function (e) {
+            switch (e.key) {
+                case 'ArrowUp':
+                    moveBox(movingBox, 0, -step);
+                    break;
+                case 'ArrowDown':
+                    moveBox(movingBox, 0, step);
+                    break;
+                case 'ArrowLeft':
+                    moveBox(movingBox, -step, 0);
+                    break;
+                case 'ArrowRight':
+                    moveBox(movingBox, step, 0);
+                    break;
+            }
+
+            if (checkCollision(movingBox, staticBox)) {
+                updateScore();
+                placeStaticBox();
+            }
+        });
+
+        var coordinatesChartCanvas = document.getElementById("coordinatesChart");
+        var coordinatesChartCtx = coordinatesChartCanvas.getContext('2d');
+
+        // Initialize the Chart.js line chart for coordinates
+        var coordinatesChart = new Chart(coordinatesChartCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'X Coordinate',
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    data: [],
+                    fill: false
+                }, {
+                    label: 'Y Coordinate',
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    data: [],
+                    fill: false
+                }]
+            }
+        });
+
+        async function init() {
+            const URL = "https://teachablemachine.withgoogle.com/models/AKwKDuznL/";
+            const modelURL = URL + "model.json";
+            const metadataURL = URL + "metadata.json";
+
+            // load the model and metadata
+            // Refer to tmImage.loadFromFiles() in the API to support files from a file picker
+            // Note: the pose library adds a tmPose object to your window (window.tmPose)
+            const model = await tmPose.load(modelURL, metadataURL);
+            const maxPredictions = model.getTotalClasses();
+
+            // Convenience function to setup a webcam
+            const size = 200;
+            const flip = true; // whether to flip the webcam
+            const webcam = new tmPose.Webcam(size, size, flip); // width, height, flip
+            await webcam.setup(); // request access to the webcam
+            await webcam.play();
+            window.requestAnimationFrame(loop);
+
+            // append/get elements to the DOM
+            const canvas = document.getElementById("canvas");
+            canvas.width = size; canvas.height = size;
+            const ctx = canvas.getContext("2d");
+            const labelContainer = document.getElementById("label-container");
+            for (let i = 0; i < maxPredictions; i++) { // and class labels
+                labelContainer.appendChild(document.createElement("div"));
+            }
+
+            const probabilityChartCanvas = document.getElementById("probabilityChart");
+            const probabilityChartCtx = probabilityChartCanvas.getContext('2d');
+
+            // Initialize the Chart.js pie chart
+            const probabilityChart = new Chart(probabilityChartCtx, {
+                type: 'pie',
+                data: {
+                    labels: Array.from({ length: maxPredictions }, (_, i) => 'Class ' + (i + 1)),
+                    datasets: [{
+                        data: Array(maxPredictions).fill(1),
+                        backgroundColor: Array(maxPredictions).fill('').map((_, i) => `hsl(${(i * (360 / maxPredictions)) % 360}, 100%, 50%)`)
+                    }]
+                }
+            });
+
+            async function loop() {
+                webcam.update(); // update the webcam frame
+                await predict();
+                window.requestAnimationFrame(loop);
+            }
+
+            async function predict() {
+                // Prediction #1: run input through posenet
+                // estimatePose can take in an image, video or canvas html element
+                const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
+                // Prediction 2: run input through teachable machine classification model
+                const prediction = await model.predict(posenetOutput);
+
+                for (let i = 0; i < maxPredictions; i++) {
+                    const classPrediction =
+                        prediction[i].className + ": " + prediction[i].probability.toFixed(2);
+                    labelContainer.childNodes[i].innerHTML = classPrediction;
+                }
+
+                const highestProbabilityClass = getClassName(prediction);
+
+                updateProbabilityChart(prediction);
+
+                const direction = getDirectionFromPrediction(highestProbabilityClass);
+                moveBoxByDirection(movingBox, direction);
+
+                drawPose(pose);
+            }
+
+            function getClassName(prediction) {
+                let maxProbability = -1;
+                let className = "";
+
+                for (let i = 0; i < prediction.length; i++) {
+                    const probability = prediction[i].probability;
+
+                    if (probability > maxProbability) {
+                        maxProbability = probability;
+                        className = prediction[i].className;
+                    }
+                }
+                document.getElementById("result").innerHTML = className;
+                return className;
+            }
+
+            function drawPose(pose) {
+                if (webcam.canvas) {
+                    ctx.drawImage(webcam.canvas, 0, 0);
+                    // draw the keypoints and skeleton
+                    if (pose) {
+                        const minPartConfidence = 0.5;
+                        tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
+                        tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
+                    }
+                }
+            }
+
+            function getDirectionFromPrediction(className) {
+                switch (className) {
+                    case 'ArrowUp':
+                        return { x: 0, y: -step };
+                    case 'ArrowDown':
+                        return { x: 0, y: step };
+                    case 'ArrowLeft':
+                        return { x: -step, y: 0 };
+                    case 'ArrowRight':
+                        return { x: step, y: 0 };
+                    default:
+                        return { x: 0, y: 0 };
+                }
+            }
+
+            function moveBoxByDirection(box, direction) {
+                moveBox(box, direction.x, direction.y);
+            }
+
+            function updateProbabilityChart(prediction) {
+                const probabilityValues = prediction.map(p => p.probability.toFixed(2));
+                probabilityChart.data.datasets[0].data = probabilityValues;
+                probabilityChart.update();
+            }
+        }
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL"
+        crossorigin="anonymous"></script>
+</body>
+
+</html>
